@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 모든 요청에서 인증 여부 확인
+    match /users/{uid} {
+      allow read, write: if request.auth.uid == uid;
+
+      // 학기 컬렉션
+      match /semesters/{semesterId} {
+        allow read, write: if request.auth.uid == uid;
+
+        // 과목 컬렉션
+        match /courses/{courseId} {
+          allow read, write: if request.auth.uid == uid;
+        }
+      }
+
+      // 시험 컬렉션
+      match /exams/{examId} {
+        allow read, write: if request.auth.uid == uid;
+      }
+
+      // 졸업 요건
+      match /graduation/{document=**} {
+        allow read, write: if request.auth.uid == uid;
+      }
+
+      // 설정
+      match /settings/{document=**} {
+        allow read, write: if request.auth.uid == uid;
+      }
+    }
+
+    // 다른 모든 경로는 접근 거부
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

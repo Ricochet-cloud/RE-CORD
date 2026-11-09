@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RE:CORD - 학업 관리 시스템</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <!-- Auth Screen -->
+  <div id="authScreen" class="auth-screen">
+    <div class="auth-container">
+      <div class="auth-logo">RE:CORD</div>
+
+      <!-- Login Form -->
+      <div id="loginFormContainer" class="auth-form-container active">
+        <h2>로그인</h2>
+        <form id="loginForm" class="form">
+          <div class="form-group">
+            <label for="loginEmail">이메일</label>
+            <input type="email" id="loginEmail" required>
+          </div>
+          <div class="form-group">
+            <label for="loginPassword">비밀번호</label>
+            <input type="password" id="loginPassword" required>
+          </div>
+          <div id="loginError" class="error-message" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary btn-block">로그인</button>
+        </form>
+        <div class="auth-links">
+          <button type="button" class="link-btn" onclick="app.switchAuthForm('signup')">회원가입</button>
+          <button type="button" class="link-btn" onclick="app.switchAuthForm('reset')">비밀번호 재설정</button>
+        </div>
+      </div>
+
+      <!-- Signup Form -->
+      <div id="signupFormContainer" class="auth-form-container">
+        <h2>회원가입</h2>
+        <form id="signupForm" class="form">
+          <div class="form-group">
+            <label for="signupEmail">이메일</label>
+            <input type="email" id="signupEmail" required>
+          </div>
+          <div class="form-group">
+            <label for="signupPassword">비밀번호</label>
+            <input type="password" id="signupPassword" required>
+          </div>
+          <div class="form-group">
+            <label for="signupPasswordConfirm">비밀번호 확인</label>
+            <input type="password" id="signupPasswordConfirm" required>
+          </div>
+          <div id="signupError" class="error-message" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary btn-block">회원가입</button>
+        </form>
+        <div class="auth-links">
+          <button type="button" class="link-btn" onclick="app.switchAuthForm('login')">로그인</button>
+        </div>
+      </div>
+
+      <!-- Password Reset Form -->
+      <div id="resetFormContainer" class="auth-form-container">
+        <h2>비밀번호 재설정</h2>
+        <form id="resetForm" class="form">
+          <div class="form-group">
+            <label for="resetEmail">이메일</label>
+            <input type="email" id="resetEmail" required>
+          </div>
+          <div id="resetMessage" class="success-message" style="display: none;"></div>
+          <div id="resetError" class="error-message" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary btn-block">재설정 링크 전송</button>
+        </form>
+        <div class="auth-links">
+          <button type="button" class="link-btn" onclick="app.switchAuthForm('login')">로그인</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="appContainer" class="container" style="display: none;">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">RE:CORD</div>
+        <button id="logoutBtn" class="btn btn-small btn-ghost" title="로그아웃">🚪</button>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-page="dashboard">
+          <span class="icon">📊</span>
+          <span class="label">대시보드</span>
+        </button>
+        <button class="nav-item" data-page="grades">
+          <span class="icon">📝</span>
+          <span class="label">성적 관리</span>
+        </button>
+        <button class="nav-item" data-page="exams">
+          <span class="icon">📅</span>
+          <span class="label">시험 일정</span>
+        </button>
+        <button class="nav-item" data-page="graduation">
+          <span class="icon">🎓</span>
+          <span class="label">졸업 요건</span>
+        </button>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <!-- Dashboard Page -->
+      <section id="dashboard" class="page active">
+        <div class="page-header">
+          <h1>대시보드</h1>
+        </div>
+        <div class="dashboard-grid">
+          <div class="stat-card">
+            <div class="stat-label">누적 GPA</div>
+            <div class="stat-value" id="totalGPA">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">누적 취득 학점</div>
+            <div class="stat-value" id="totalCredits">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">등록된 학기 수</div>
+            <div class="stat-value" id="semesterCount">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">최근 학기 GPA</div>
+            <div class="stat-value" id="latestGPA">-</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>학기별 성적 요약</h2>
+          <div id="semesterSummary" class="semester-summary-container">
+            <p class="empty-state">등록된 학기가 없습니다. 성적 관리에서 학기를 생성해주세요.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Grades Page -->
+      <section id="grades" class="page">
+        <div class="page-header">
+          <h1>성적 관리</h1>
+          <div class="header-controls">
+            <select id="semesterSelector" class="semester-select">
+              <option value="">학기 선택</option>
+            </select>
+            <button id="addSemesterBtn" class="btn btn-primary">학기 추가</button>
+          </div>
+        </div>
+
+        <div class="card" id="semesterDetailsCard" style="display: none;">
+          <div class="card-header">
+            <div class="card-title">
+              <span id="currentSemesterName">-</span>
+              <button id="editSemesterBtn" class="btn btn-small btn-ghost">수정</button>
+              <button id="deleteSemesterBtn" class="btn btn-small btn-danger-ghost">삭제</button>
+            </div>
+          </div>
+
+          <div class="semester-stats">
+            <div class="stat-item">
+              <span class="label">학기 GPA:</span>
+              <span class="value" id="semesterGPA">-</span>
+            </div>
+            <div class="stat-item">
+              <span class="label">취득 학점:</span>
+              <span class="value" id="semesterCredits">0</span>
+            </div>
+          </div>
+
+          <div class="courses-section">
+            <div class="section-header">
+              <h3>과목</h3>
+              <button id="addCourseBtn" class="btn btn-primary btn-small">과목 추가</button>
+            </div>
+            <div id="coursesList" class="courses-list">
+              <p class="empty-state">등록된 과목이 없습니다.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="noSemesterMessage" class="card">
+          <p class="empty-state">학기를 선택하거나 추가해주세요.</p>
+        </div>
+      </section>
+
+      <!-- Exams Page -->
+      <section id="exams" class="page">
+        <div class="page-header">
+          <h1>시험 일정</h1>
+          <div class="header-controls">
+            <button id="addExamBtn" class="btn btn-primary">시험 등록</button>
+          </div>
+        </div>
+
+        <div id="examTabsContainer" class="tab-container">
+          <button class="tab-btn active" data-tab="exam-list">목록</button>
+          <button class="tab-btn" data-tab="exam-calendar">캘린더</button>
+        </div>
+
+        <!-- Exam List Tab -->
+        <div id="exam-list" class="tab-content active">
+          <div class="card">
+            <div id="examsList" class="exams-list">
+              <p class="empty-state">등록된 시험이 없습니다.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Exam Calendar Tab -->
+        <div id="exam-calendar" class="tab-content">
+          <div class="card">
+            <div class="calendar-header">
+              <button id="prevMonthBtn" class="btn btn-small btn-ghost">&lt;</button>
+              <h3 id="calendarMonth">-</h3>
+              <button id="nextMonthBtn" class="btn btn-small btn-ghost">&gt;</button>
+            </div>
+            <div id="examCalendar" class="calendar-container">
+              <div class="calendar-weekdays">
+                <div class="weekday">일</div>
+                <div class="weekday">월</div>
+                <div class="weekday">화</div>
+                <div class="weekday">수</div>
+                <div class="weekday">목</div>
+                <div class="weekday">금</div>
+                <div class="weekday">토</div>
+              </div>
+              <div id="calendarDays" class="calendar-days"></div>
+            </div>
+            <div id="calendarEventsList" class="calendar-events-list">
+              <p class="empty-state">날짜를 선택하세요.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Graduation Page -->
+      <section id="graduation" class="page">
+        <div class="page-header">
+          <h1>졸업 요건</h1>
+          <button id="editGraduationBtn" class="btn btn-primary">기준 수정</button>
+        </div>
+
+        <!-- Graduation Progress -->
+        <div class="card">
+          <h2>졸업 진행률</h2>
+          <div id="graduationProgressContainer" class="graduation-progress-container">
+            <p class="empty-state">졸업 기준을 설정하세요.</p>
+          </div>
+        </div>
+
+        <!-- Custom Requirements -->
+        <div class="card">
+          <div class="section-header">
+            <h2>기타 졸업 요건</h2>
+            <button id="addCustomRequirementBtn" class="btn btn-primary btn-small">요건 추가</button>
+          </div>
+          <div id="customRequirementsList" class="custom-requirements-list">
+            <p class="empty-state">기타 요건이 없습니다.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modals -->
+  <div id="addSemesterModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>학기 추가</h2>
+        <button class="modal-close" data-modal="addSemesterModal">&times;</button>
+      </div>
+      <form id="addSemesterForm" class="form">
+        <div class="form-group">
+          <label for="semesterYear">연도</label>
+          <input type="number" id="semesterYear" required min="2000" max="2100">
+        </div>
+        <div class="form-group">
+          <label for="semesterTerm">학기</label>
+          <select id="semesterTerm" required>
+            <option value="">선택</option>
+            <option value="1">1학기</option>
+            <option value="2">2학기</option>
+            <option value="3">3학기(여름방학)</option>
+            <option value="4">4학기(겨울방학)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="semesterName">학기명(선택)</label>
+          <input type="text" id="semesterName" placeholder="예: 2024-1, 신입학 1학기">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="addSemesterModal">취소</button>
+          <button type="submit" class="btn btn-primary">추가</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="editSemesterModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>학기 수정</h2>
+        <button class="modal-close" data-modal="editSemesterModal">&times;</button>
+      </div>
+      <form id="editSemesterForm" class="form">
+        <div class="form-group">
+          <label for="editSemesterYear">연도</label>
+          <input type="number" id="editSemesterYear" required min="2000" max="2100">
+        </div>
+        <div class="form-group">
+          <label for="editSemesterTerm">학기</label>
+          <select id="editSemesterTerm" required>
+            <option value="">선택</option>
+            <option value="1">1학기</option>
+            <option value="2">2학기</option>
+            <option value="3">3학기(여름방학)</option>
+            <option value="4">4학기(겨울방학)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="editSemesterName">학기명</label>
+          <input type="text" id="editSemesterName" placeholder="예: 2024-1, 신입학 1학기">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="editSemesterModal">취소</button>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="addCourseModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>과목 추가</h2>
+        <button class="modal-close" data-modal="addCourseModal">&times;</button>
+      </div>
+      <form id="addCourseForm" class="form">
+        <div class="form-group">
+          <label for="courseName">과목명 *</label>
+          <input type="text" id="courseName" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="courseCredits">학점 *</label>
+            <input type="number" id="courseCredits" required min="0" step="0.5">
+          </div>
+          <div class="form-group">
+            <label for="courseGrade">성적 *</label>
+            <select id="courseGrade" required>
+              <option value="">선택</option>
+              <option value="A+">A+</option>
+              <option value="A">A</option>
+              <option value="B+">B+</option>
+              <option value="B">B</option>
+              <option value="C+">C+</option>
+              <option value="C">C</option>
+              <option value="D+">D+</option>
+              <option value="D">D</option>
+              <option value="F">F</option>
+              <option value="P">P (Pass)</option>
+              <option value="NP">NP (No Pass)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="courseCategory">이수 구분 *</label>
+          <select id="courseCategory" required>
+            <option value="">선택</option>
+            <option value="major-required">전공 필수</option>
+            <option value="major-elective">전공 선택</option>
+            <option value="general-ed">교양</option>
+            <option value="free-elective">일반 선택</option>
+            <option value="other">기타</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="addCourseModal">취소</button>
+          <button type="submit" class="btn btn-primary">추가</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="editCourseModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>과목 수정</h2>
+        <button class="modal-close" data-modal="editCourseModal">&times;</button>
+      </div>
+      <form id="editCourseForm" class="form">
+        <div class="form-group">
+          <label for="editCourseName">과목명 *</label>
+          <input type="text" id="editCourseName" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="editCourseCredits">학점 *</label>
+            <input type="number" id="editCourseCredits" required min="0" step="0.5">
+          </div>
+          <div class="form-group">
+            <label for="editCourseGrade">성적 *</label>
+            <select id="editCourseGrade" required>
+              <option value="">선택</option>
+              <option value="A+">A+</option>
+              <option value="A">A</option>
+              <option value="B+">B+</option>
+              <option value="B">B</option>
+              <option value="C+">C+</option>
+              <option value="C">C</option>
+              <option value="D+">D+</option>
+              <option value="D">D</option>
+              <option value="F">F</option>
+              <option value="P">P (Pass)</option>
+              <option value="NP">NP (No Pass)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="editCourseCategory">이수 구분 *</label>
+          <select id="editCourseCategory" required>
+            <option value="">선택</option>
+            <option value="major-required">전공 필수</option>
+            <option value="major-elective">전공 선택</option>
+            <option value="general-ed">교양</option>
+            <option value="free-elective">일반 선택</option>
+            <option value="other">기타</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="editCourseModal">취소</button>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="confirmModal" class="modal hidden">
+    <div class="modal-content modal-confirm">
+      <div class="modal-header">
+        <h2 id="confirmTitle">확인</h2>
+      </div>
+      <p id="confirmMessage"></p>
+      <div class="form-actions">
+        <button class="btn btn-ghost" data-modal="confirmModal">취소</button>
+        <button id="confirmBtn" class="btn btn-danger">삭제</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addExamModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>시험 등록</h2>
+        <button class="modal-close" data-modal="addExamModal">&times;</button>
+      </div>
+      <form id="addExamForm" class="form">
+        <div class="form-group">
+          <label for="examName">자격증 이름 *</label>
+          <input type="text" id="examName" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="examType">시험 종류 *</label>
+            <select id="examType" required>
+              <option value="">선택</option>
+              <option value="written">필기</option>
+              <option value="practical">실기</option>
+              <option value="other">기타</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="examDate">시험 날짜 *</label>
+            <input type="date" id="examDate" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="regStartDate">접수 시작일</label>
+            <input type="date" id="regStartDate">
+          </div>
+          <div class="form-group">
+            <label for="regEndDate">접수 마감일</label>
+            <input type="date" id="regEndDate">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="examLocation">시험 장소</label>
+          <input type="text" id="examLocation">
+        </div>
+        <div class="form-group">
+          <label for="examMemo">메모</label>
+          <textarea id="examMemo" rows="3"></textarea>
+        </div>
+        <div id="examDateError" class="error-message" style="display: none;"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="addExamModal">취소</button>
+          <button type="submit" class="btn btn-primary">등록</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="editExamModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>시험 수정</h2>
+        <button class="modal-close" data-modal="editExamModal">&times;</button>
+      </div>
+      <form id="editExamForm" class="form">
+        <div class="form-group">
+          <label for="editExamName">자격증 이름 *</label>
+          <input type="text" id="editExamName" required>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="editExamType">시험 종류 *</label>
+            <select id="editExamType" required>
+              <option value="">선택</option>
+              <option value="written">필기</option>
+              <option value="practical">실기</option>
+              <option value="other">기타</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="editExamDate">시험 날짜 *</label>
+            <input type="date" id="editExamDate" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="editRegStartDate">접수 시작일</label>
+            <input type="date" id="editRegStartDate">
+          </div>
+          <div class="form-group">
+            <label for="editRegEndDate">접수 마감일</label>
+            <input type="date" id="editRegEndDate">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="editExamLocation">시험 장소</label>
+          <input type="text" id="editExamLocation">
+        </div>
+        <div class="form-group">
+          <label for="editExamMemo">메모</label>
+          <textarea id="editExamMemo" rows="3"></textarea>
+        </div>
+        <div id="editExamDateError" class="error-message" style="display: none;"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="editExamModal">취소</button>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="editGraduationModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>졸업 기준 설정</h2>
+        <button class="modal-close" data-modal="editGraduationModal">&times;</button>
+      </div>
+      <form id="editGraduationForm" class="form">
+        <h3>기본 항목 (학점)</h3>
+        <div class="form-group">
+          <label for="totalCredits">총 졸업 필요 학점</label>
+          <input type="number" id="totalCredits" min="0" step="1">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="majorRequiredCredits">전공 필수</label>
+            <input type="number" id="majorRequiredCredits" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label for="majorElectiveCredits">전공 선택</label>
+            <input type="number" id="majorElectiveCredits" min="0" step="1">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="generalEdCredits">교양</label>
+            <input type="number" id="generalEdCredits" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label for="freeElectiveCredits">일반 선택</label>
+            <input type="number" id="freeElectiveCredits" min="0" step="1">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="editGraduationModal">취소</button>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="addCustomRequirementModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>기타 졸업 요건 추가</h2>
+        <button class="modal-close" data-modal="addCustomRequirementModal">&times;</button>
+      </div>
+      <form id="addCustomRequirementForm" class="form">
+        <div class="form-group">
+          <label for="customReqName">요건 이름 *</label>
+          <input type="text" id="customReqName" required>
+        </div>
+        <div class="form-group">
+          <label for="customReqMemo">메모</label>
+          <textarea id="customReqMemo" rows="3"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="addCustomRequirementModal">취소</button>
+          <button type="submit" class="btn btn-primary">추가</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="editCustomRequirementModal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>기타 졸업 요건 수정</h2>
+        <button class="modal-close" data-modal="editCustomRequirementModal">&times;</button>
+      </div>
+      <form id="editCustomRequirementForm" class="form">
+        <div class="form-group">
+          <label for="editCustomReqName">요건 이름 *</label>
+          <input type="text" id="editCustomReqName" required>
+        </div>
+        <div class="form-group">
+          <label for="editCustomReqMemo">메모</label>
+          <textarea id="editCustomReqMemo" rows="3"></textarea>
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" id="editCustomReqCompleted">
+            충족 완료
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" data-modal="editCustomRequirementModal">취소</button>
+          <button type="submit" class="btn btn-primary">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
