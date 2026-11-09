@@ -7,8 +7,20 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
+  <!-- 로그인 확인·클라우드 데이터 불러오는 동안 표시 -->
+  <div id="syncLoading" class="sync-loading">
+    <div class="sync-loading-box">
+      <p id="syncLoadingText">불러오는 중...</p>
+      <div id="syncLoadingActions" class="sync-loading-actions" style="display: none;">
+        <button type="button" class="btn btn-primary" onclick="app.retrySync()">다시 시도</button>
+        <button type="button" class="btn btn-ghost" onclick="app.continueOffline()">이 기기의 데이터로 계속</button>
+        <button type="button" class="btn btn-ghost" onclick="app.handleLogout()">로그아웃</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Auth Screen -->
-  <div id="authScreen" class="auth-screen">
+  <div id="authScreen" class="auth-screen" style="display: none;">
     <div class="auth-container">
       <div class="auth-logo">RE:CORD</div>
 
@@ -659,6 +671,12 @@
         </div>
       </form>
     </div>
+  </div>
+
+  <!-- 클라우드 저장 상태 알림 -->
+  <div id="syncStatus" class="sync-status" style="display: none;">
+    <span id="syncStatusText"></span>
+    <button type="button" class="btn btn-small btn-primary" onclick="app.retrySync()">다시 시도</button>
   </div>
 
   <script type="module" src="./app.js"></script>

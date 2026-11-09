@@ -15,7 +15,8 @@ class FirebaseAuthManager {
   constructor() {
     this.app = null;
     this.auth = null;
-    this.currentUser = null;
+    // undefined = 아직 로그인 상태를 확인하기 전 (null = 로그아웃 상태 확인됨)
+    this.currentUser = undefined;
     this.authStateChangeCallbacks = [];
     this.initialized = false;
   }
@@ -112,7 +113,7 @@ class FirebaseAuthManager {
   }
 
   isAuthenticated() {
-    return this.currentUser !== null;
+    return !!this.currentUser;
   }
 
   getUserId() {

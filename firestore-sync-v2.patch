@@ -1,0 +1,1140 @@
+diff --git a/app.js b/app.js
+index aeda9c4..dd80294 100644
+--- a/app.js
++++ b/app.js
+@@ -1,9 +1,10 @@
+-import { Storage, setFirebaseDb } from './storage.js';
++import { Storage } from './storage.js';
+ import { GradeCalculator } from './grade-calculator.js';
+ import { ExamCalculator } from './exam-calculator.js';
+ import { GraduationCalculator } from './graduation-calculator.js';
+ import { authManager } from './firebase-auth.js';
+ import { firebaseDb } from './firebase-db.js';
++import { cloudSync } from './sync.js';
+ 
+ class RecordApp {
+   constructor() {
+@@ -17,6 +18,8 @@ class RecordApp {
+     this.confirmCallback = null;
+     this.useFirebase = false;
+     this.isInitializing = true;
++    this.authSeq = 0;
++    this.activeUid = null;
+     this.initializeApp();
+   }
+ 
+@@ -31,16 +34,29 @@ class RecordApp {
+     this.useFirebase = firebaseInitialized && firebaseDbInitialized;
+ 
+     if (this.useFirebase) {
+-      // Storage에 firebaseDb 인스턴스 등록
+-      setFirebaseDb(firebaseDb);
++      // 클라우드 저장에 실패하면 화면 아래에 알림 표시
++      cloudSync.onStatus((state, message) => {
++        if (state === 'error') {
++          this.showSyncStatus(`일부 변경사항을 클라우드에 저장하지 못했습니다. ${message}`);
++        } else {
++          this.hideSyncStatus();
++        }
++      });
+ 
+-      // Firebase 인증 상태 모니터링
++      // 서버로 전송 중인 변경이 있는데 창을 닫으려 하면 경고
++      window.addEventListener('beforeunload', (e) => {
++        if (cloudSync.hasPending()) {
++          e.preventDefault();
++          e.returnValue = '';
++        }
++      });
++
++      // Firebase 인증 상태 모니터링 (로그인 / 로그아웃 / 새로고침)
+       authManager.onAuthStateChange((user) => {
+         if (user) {
+-          this.showAppUI();
+-          this.loadUserData();
++          this.handleSignedIn(user);
+         } else {
+-          this.showAuthUI();
++          this.handleSignedOut();
+         }
+       });
+     } else {
+@@ -52,11 +68,21 @@ class RecordApp {
+   }
+ 
+   showAuthUI() {
++    document.getElementById('syncLoading').style.display = 'none';
+     document.getElementById('authScreen').style.display = 'flex';
+     document.getElementById('appContainer').style.display = 'none';
+   }
+ 
++  showLoadingUI(message = '데이터를 불러오는 중...', withActions = false) {
++    document.getElementById('authScreen').style.display = 'none';
++    document.getElementById('appContainer').style.display = 'none';
++    document.getElementById('syncLoading').style.display = 'flex';
++    document.getElementById('syncLoadingText').textContent = message;
++    document.getElementById('syncLoadingActions').style.display = withActions ? 'flex' : 'none';
++  }
++
+   showAppUI() {
++    document.getElementById('syncLoading').style.display = 'none';
+     document.getElementById('authScreen').style.display = 'none';
+     document.getElementById('appContainer').style.display = 'flex';
+     if (this.isInitializing) {
+@@ -65,25 +91,112 @@ class RecordApp {
+     }
+   }
+ 
+-  async loadUserData() {
+-    try {
+-      if (!this.useFirebase) {
+-        this.updateDashboard();
+-        return;
+-      }
++  showSyncStatus(message) {
++    document.getElementById('syncStatusText').textContent = message;
++    document.getElementById('syncStatus').style.display = 'flex';
++  }
++
++  hideSyncStatus() {
++    document.getElementById('syncStatus').style.display = 'none';
++  }
+ 
+-      // Firestore에서 데이터 로드
+-      const semesters = await firebaseDb.getSemesters();
+-      const exams = await firebaseDb.getExams();
+-      const requirements = await firebaseDb.getGraduationRequirements();
+-      const settings = await firebaseDb.getSettings();
++  // 로그인 완료: 클라우드 데이터를 불러온 뒤 앱 화면을 보여줌
++  async handleSignedIn(user) {
++    // 같은 계정으로 이미 들어와 있는 상태의 중복 이벤트는 무시
++    if (this.activeUid === user.uid) return;
+ 
+-      // 화면 업데이트
+-      this.updateDashboard();
+-    } catch (error) {
+-      console.error('사용자 데이터 로드 실패:', error);
+-      this.updateDashboard();
++    const seq = ++this.authSeq;
++    this.showLoadingUI();
++
++    const result = await cloudSync.start({
++      uid: user.uid,
++      confirmAdopt: (summary, cloudHasData) => this.confirmAdoptLegacy(user, summary, cloudHasData)
++    });
++
++    // 불러오는 사이에 로그아웃했거나 다른 계정으로 바뀐 경우
++    if (seq !== this.authSeq) return;
++
++    if (!result.ok) {
++      this.showLoadingUI(`클라우드에서 데이터를 불러오지 못했습니다.\n${result.error}`, true);
++      return;
+     }
++
++    this.enterApp(user);
++  }
++
++  handleSignedOut() {
++    this.authSeq++;
++    this.activeUid = null;
++    cloudSync.stop();
++    this.hideSyncStatus();
++    this.showAuthUI();
++  }
++
++  enterApp(user) {
++    this.activeUid = user.uid;
++    this.hideSyncStatus();
++    this.resetViewState();
++    this.showAppUI();
++    this.refreshAllViews();
++  }
++
++  // 클라우드에 연결하지 못했을 때 이 기기의 데이터로만 사용
++  continueOffline() {
++    const user = authManager.getCurrentUser();
++    if (!user) return;
++
++    cloudSync.useLocalOnly();
++    this.enterApp(user);
++    this.showSyncStatus('클라우드에 연결되지 않아 이 기기에만 저장 중입니다.');
++  }
++
++  retrySync() {
++    const user = authManager.getCurrentUser();
++    if (!user) return;
++
++    this.activeUid = null;
++    this.handleSignedIn(user);
++  }
++
++  confirmAdoptLegacy(user, summary, cloudHasData) {
++    const parts = [`학기 ${summary.semesters}개`, `과목 ${summary.courses}개`, `시험 ${summary.exams}개`];
++    if (summary.hasGraduation) parts.push('졸업 요건');
++    const data = parts.join(', ');
++
++    if (cloudHasData) {
++      return confirm(
++        `이 브라우저에 저장된 기존 데이터(${data})가 있습니다.\n` +
++        `${user.email} 계정의 클라우드에도 이미 데이터가 있어 두 데이터를 합칠까요?\n\n` +
++        '[확인] 합쳐서 클라우드에 올립니다. 같은 항목은 더 최근에 수정한 쪽을 사용합니다.\n' +
++        '[취소] 합치지 않고 클라우드 데이터만 사용합니다. (다음 로그인 때 다시 물어봅니다)'
++      );
++    }
++
++    return confirm(
++      `이 브라우저에 저장된 기존 데이터(${data})를 ${user.email} 계정으로 옮길까요?\n\n` +
++      '[확인] 클라우드에 올려 어느 기기에서든 볼 수 있게 합니다.\n' +
++      '[취소] 옮기지 않고 빈 상태로 시작합니다. (다음 로그인 때 다시 물어봅니다)'
++    );
++  }
++
++  // 계정이 바뀌어도 이전 계정의 선택 상태가 남지 않도록 초기화
++  resetViewState() {
++    document.getElementById('semesterSelector').value = '';
++    document.getElementById('calendarEventsList').innerHTML =
++      '<p class="empty-state">날짜를 선택하세요.</p>';
++    this.selectSemester('');
++
++    this.currentSemesterId = null;
++    this.currentEditingCourseId = null;
++    this.currentEditingExamId = null;
++    this.currentEditingCustomReqId = null;
++    this.currentSelectedCalendarDate = null;
++  }
++
++  refreshAllViews() {
++    this.updateDashboard();
++    this.updateSemesterSelector();
++    this.updateCalendar();
+   }
+ 
+   init() {
+@@ -1074,7 +1187,7 @@ class RecordApp {
+     }
+ 
+     document.getElementById('signupForm').reset();
+-    alert('회원가입에 성공했습니다. 로그인해주세요.');
++    // 가입하면 자동으로 로그인되어 앱 화면으로 넘어감
+     this.switchAuthForm('login');
+   }
+ 
+@@ -1102,6 +1215,9 @@ class RecordApp {
+   async handleLogout() {
+     if (!confirm('로그아웃하시겠습니까?')) return;
+ 
++    // 서버로 전송 중인 변경이 있으면 마무리한 뒤 로그아웃
++    await cloudSync.flush();
++
+     const result = await authManager.signOutUser();
+     if (result.success) {
+       // Storage 초기화
+diff --git a/firebase-auth.js b/firebase-auth.js
+index b69e4f1..4e468ae 100644
+--- a/firebase-auth.js
++++ b/firebase-auth.js
+@@ -15,7 +15,8 @@ class FirebaseAuthManager {
+   constructor() {
+     this.app = null;
+     this.auth = null;
+-    this.currentUser = null;
++    // undefined = 아직 로그인 상태를 확인하기 전 (null = 로그아웃 상태 확인됨)
++    this.currentUser = undefined;
+     this.authStateChangeCallbacks = [];
+     this.initialized = false;
+   }
+@@ -112,7 +113,7 @@ class FirebaseAuthManager {
+   }
+ 
+   isAuthenticated() {
+-    return this.currentUser !== null;
++    return !!this.currentUser;
+   }
+ 
+   getUserId() {
+diff --git a/firebase-db.js b/firebase-db.js
+index e398455..0399177 100644
+--- a/firebase-db.js
++++ b/firebase-db.js
+@@ -10,11 +10,27 @@ import {
+   deleteDoc,
+   query,
+   where,
+-  serverTimestamp
++  serverTimestamp,
++  writeBatch
+ } from 'https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js';
+ import { firebaseConfig } from './firebase-config.js';
+ import { authManager } from './firebase-auth.js';
+ 
++// Firestore는 undefined 값을 저장하지 못하므로 JSON 변환으로 제거
++function clean(value) {
++  return JSON.parse(JSON.stringify(value ?? {}));
++}
++
++// Firestore Timestamp를 ISO 문자열로 바꿔 로컬 저장 형식과 맞춤
++function plain(value) {
++  if (value && typeof value.toDate === 'function') return value.toDate().toISOString();
++  if (Array.isArray(value)) return value.map(plain);
++  if (value && typeof value === 'object') {
++    return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, plain(val)]));
++  }
++  return value;
++}
++
+ class FirebaseDatabase {
+   constructor() {
+     this.db = null;
+@@ -169,7 +185,7 @@ class FirebaseDatabase {
+     const reqRef = doc(this.db, 'users', uid, 'graduation', 'requirements');
+ 
+     await setDoc(reqRef, {
+-      ...requirements,
++      ...clean(requirements),
+       updatedAt: serverTimestamp()
+     });
+   }
+@@ -210,11 +226,113 @@ class FirebaseDatabase {
+     const settingsRef = doc(this.db, 'users', uid, 'settings', 'preferences');
+ 
+     await setDoc(settingsRef, {
+-      ...settings,
++      ...clean(settings),
+       updatedAt: serverTimestamp()
+     });
+   }
+ 
++  // ===== 동기화용 함수: 로컬에서 만든 id를 그대로 사용 =====
++  requireUid() {
++    const uid = authManager.getUserId();
++    if (!uid) throw new Error('인증되지 않은 사용자');
++    return uid;
++  }
++
++  async setSemester(semester) {
++    const uid = this.requireUid();
++    await setDoc(doc(this.db, 'users', uid, 'semesters', semester.id), clean(semester));
++  }
++
++  async setCourse(semesterId, course) {
++    const uid = this.requireUid();
++    await setDoc(
++      doc(this.db, 'users', uid, 'semesters', semesterId, 'courses', course.id),
++      clean(course)
++    );
++  }
++
++  async setExam(exam) {
++    const uid = this.requireUid();
++    await setDoc(doc(this.db, 'users', uid, 'exams', exam.id), clean(exam));
++  }
++
++  // 로그인 시 서버의 모든 데이터를 한 번에 불러옴 (오류는 삼키지 않고 던짐)
++  async loadAll() {
++    const uid = this.requireUid();
++
++    const semesterSnap = await getDocs(collection(this.db, 'users', uid, 'semesters'));
++    const semesters = semesterSnap.docs.map(d => plain({ id: d.id, ...d.data() }));
++
++    const courses = {};
++    await Promise.all(semesters.map(async (semester) => {
++      const snap = await getDocs(
++        collection(this.db, 'users', uid, 'semesters', semester.id, 'courses')
++      );
++      courses[semester.id] = snap.docs.map(d => plain({ id: d.id, ...d.data() }));
++    }));
++
++    const examSnap = await getDocs(collection(this.db, 'users', uid, 'exams'));
++    const exams = examSnap.docs.map(d => plain({ id: d.id, ...d.data() }));
++
++    const reqSnap = await getDoc(doc(this.db, 'users', uid, 'graduation', 'requirements'));
++    const settingsSnap = await getDoc(doc(this.db, 'users', uid, 'settings', 'preferences'));
++    const graduationRequirements = reqSnap.exists() ? plain(reqSnap.data()) : null;
++    const settings = settingsSnap.exists() ? plain(settingsSnap.data()) : null;
++
++    return {
++      semesters,
++      courses,
++      exams,
++      graduationRequirements,
++      settings,
++      isEmpty: semesters.length === 0 && exams.length === 0 &&
++        !graduationRequirements && !settings
++    };
++  }
++
++  // 로컬 데이터 전체를 서버에 올림 (기존 데이터 이전, 동기화 실패 복구용)
++  async saveAll(data) {
++    const uid = this.requireUid();
++    const writes = [];
++
++    for (const semester of data.semesters || []) {
++      writes.push([doc(this.db, 'users', uid, 'semesters', semester.id), clean(semester)]);
++      for (const course of (data.courses || {})[semester.id] || []) {
++        writes.push([
++          doc(this.db, 'users', uid, 'semesters', semester.id, 'courses', course.id),
++          clean(course)
++        ]);
++      }
++    }
++    for (const exam of data.exams || []) {
++      writes.push([doc(this.db, 'users', uid, 'exams', exam.id), clean(exam)]);
++    }
++    // 기본값 그대로인 졸업 요건·설정은 올리지 않음 (서버에 있는 실제 값을 기본값으로 덮어쓰지 않기 위해)
++    const requirements = clean(data.graduationRequirements);
++    const hasRequirements = Object.entries(requirements).some(([key, value]) =>
++      key === 'customRequirements' ? value.length > 0 : value !== null && value !== undefined);
++    if (hasRequirements) {
++      writes.push([
++        doc(this.db, 'users', uid, 'graduation', 'requirements'),
++        { ...requirements, updatedAt: serverTimestamp() }
++      ]);
++    }
++    const settings = clean(data.settings);
++    if (JSON.stringify(settings) !== JSON.stringify({ gpaScale: 4.5 })) {
++      writes.push([
++        doc(this.db, 'users', uid, 'settings', 'preferences'),
++        { ...settings, updatedAt: serverTimestamp() }
++      ]);
++    }
++
++    // 배치 1회 최대 500건 제한 → 400건씩 나눠 전송
++    for (let i = 0; i < writes.length; i += 400) {
++      const batch = writeBatch(this.db);
++      writes.slice(i, i + 400).forEach(([ref, value]) => batch.set(ref, value));
++      await batch.commit();
++    }
++  }
++
+   async getSettings() {
+     const uid = authManager.getUserId();
+     const settingsRef = doc(this.db, 'users', uid, 'settings', 'preferences');
+diff --git a/index.html b/index.html
+index 53b0e6e..475cf3c 100644
+--- a/index.html
++++ b/index.html
+@@ -7,8 +7,20 @@
+   <link rel="stylesheet" href="./style.css">
+ </head>
+ <body>
++  <!-- 로그인 확인·클라우드 데이터 불러오는 동안 표시 -->
++  <div id="syncLoading" class="sync-loading">
++    <div class="sync-loading-box">
++      <p id="syncLoadingText">불러오는 중...</p>
++      <div id="syncLoadingActions" class="sync-loading-actions" style="display: none;">
++        <button type="button" class="btn btn-primary" onclick="app.retrySync()">다시 시도</button>
++        <button type="button" class="btn btn-ghost" onclick="app.continueOffline()">이 기기의 데이터로 계속</button>
++        <button type="button" class="btn btn-ghost" onclick="app.handleLogout()">로그아웃</button>
++      </div>
++    </div>
++  </div>
++
+   <!-- Auth Screen -->
+-  <div id="authScreen" class="auth-screen">
++  <div id="authScreen" class="auth-screen" style="display: none;">
+     <div class="auth-container">
+       <div class="auth-logo">RE:CORD</div>
+ 
+@@ -661,6 +673,12 @@
+     </div>
+   </div>
+ 
++  <!-- 클라우드 저장 상태 알림 -->
++  <div id="syncStatus" class="sync-status" style="display: none;">
++    <span id="syncStatusText"></span>
++    <button type="button" class="btn btn-small btn-primary" onclick="app.retrySync()">다시 시도</button>
++  </div>
++
+   <script type="module" src="./app.js"></script>
+ </body>
+ </html>
+diff --git a/storage.js b/storage.js
+index 9ac963a..8b1f60c 100644
+--- a/storage.js
++++ b/storage.js
+@@ -1,53 +1,173 @@
+-const STORAGE_KEY = 'record_data_v1';
+-const DEFAULT_DATA = {
+-  version: 1,
+-  semesters: [],
+-  courses: {},
+-  exams: [],
+-  graduationRequirements: {
+-    totalCredits: null,
+-    majorRequired: null,
+-    majorElective: null,
+-    engineeringBasic: null,
+-    generalEd: null,
+-    professionalEd: null,
+-    freeElective: null,
+-    customRequirements: []
+-  },
+-  settings: {
+-    gpaScale: 4.5
+-  }
+-};
+-
+-let firebaseDbInstance = null;
+-
+-export function setFirebaseDb(fbDb) {
+-  firebaseDbInstance = fbDb;
++const BASE_KEY = 'record_data_v1';
++
++// 매번 새 객체를 만들어 계정 간 데이터가 섞이지 않도록 함
++function createDefaultData() {
++  return {
++    version: 1,
++    semesters: [],
++    courses: {},
++    exams: [],
++    graduationRequirements: {
++      totalCredits: null,
++      majorRequired: null,
++      majorElective: null,
++      engineeringBasic: null,
++      generalEd: null,
++      professionalEd: null,
++      freeElective: null,
++      customRequirements: []
++    },
++    settings: {
++      gpaScale: 4.5
++    }
++  };
++}
++
++function normalize(raw) {
++  const base = createDefaultData();
++  const data = { ...base, ...(raw || {}) };
++
++  if (!Array.isArray(data.semesters)) data.semesters = [];
++  if (!Array.isArray(data.exams)) data.exams = [];
++  if (!data.courses || typeof data.courses !== 'object') data.courses = {};
++
++  data.graduationRequirements = {
++    ...base.graduationRequirements,
++    ...(data.graduationRequirements || {})
++  };
++  if (!Array.isArray(data.graduationRequirements.customRequirements)) {
++    data.graduationRequirements.customRequirements = [];
++  }
++  data.settings = { ...base.settings, ...(data.settings || {}) };
++  return data;
++}
++
++// 서버에서 온 문서의 서버 시각 필드는 로컬 캐시에 필요 없음
++function withoutUpdatedAt(obj) {
++  const { updatedAt, ...rest } = obj || {};
++  return rest;
+ }
+ 
+ export class Storage {
++  // 로그인한 계정별로 저장 키를 분리 (setUser). 로그인 정보가 없으면 기존 키 사용
++  static storageKey = BASE_KEY;
++  static listeners = [];
++
++  static setUser(uid) {
++    this.storageKey = uid ? `${BASE_KEY}_u_${uid}` : BASE_KEY;
++  }
++
++  // 데이터 변경 알림 (클라우드 동기화에서 구독)
++  static onChange(listener) {
++    this.listeners.push(listener);
++    return () => {
++      this.listeners = this.listeners.filter(l => l !== listener);
++    };
++  }
++
++  static emit(operation) {
++    for (const listener of this.listeners) {
++      try {
++        listener(operation);
++      } catch (error) {
++        console.error('Storage 변경 알림 오류:', error);
++      }
++    }
++  }
++
+   static loadData() {
+     try {
+-      const data = localStorage.getItem(STORAGE_KEY);
+-      if (!data) {
+-        return { ...DEFAULT_DATA };
+-      }
+-      const parsed = JSON.parse(data);
+-      return { ...DEFAULT_DATA, ...parsed };
++      const raw = localStorage.getItem(this.storageKey);
++      return normalize(raw ? JSON.parse(raw) : null);
+     } catch (error) {
+       console.error('Failed to load data:', error);
+-      return { ...DEFAULT_DATA };
++      return normalize(null);
+     }
+   }
+ 
+   static saveData(data) {
+     try {
+-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
++      localStorage.setItem(this.storageKey, JSON.stringify(data));
+     } catch (error) {
+       console.error('Failed to save data:', error);
+     }
+   }
+ 
++  // 서버 데이터로 로컬 캐시를 통째로 교체 (변경 알림을 보내지 않음)
++  static replaceAll(snapshot) {
++    const courses = {};
++    for (const semester of snapshot.semesters || []) {
++      courses[semester.id] = (snapshot.courses || {})[semester.id] || [];
++    }
++    this.saveData(normalize({
++      semesters: snapshot.semesters || [],
++      courses,
++      exams: snapshot.exams || [],
++      graduationRequirements: withoutUpdatedAt(snapshot.graduationRequirements),
++      settings: withoutUpdatedAt(snapshot.settings)
++    }));
++  }
++
++  // 동기화 상태 표시 (예: dirty = 서버에 반영되지 않은 변경이 있음)
++  static getFlag(name) {
++    try {
++      return localStorage.getItem(`${this.storageKey}__${name}`) === '1';
++    } catch (error) {
++      return false;
++    }
++  }
++
++  static setFlag(name, value) {
++    try {
++      const key = `${this.storageKey}__${name}`;
++      if (value) {
++        localStorage.setItem(key, '1');
++      } else {
++        localStorage.removeItem(key);
++      }
++    } catch (error) {
++      console.error('Failed to save flag:', error);
++    }
++  }
++
++  // 계정별 저장을 도입하기 전에 이 브라우저에 쌓인 기존 데이터
++  static legacySummary() {
++    try {
++      const raw = localStorage.getItem(BASE_KEY);
++      if (!raw) return null;
++      const data = normalize(JSON.parse(raw));
++      const requirements = data.graduationRequirements;
++      const summary = {
++        semesters: data.semesters.length,
++        courses: Object.values(data.courses).reduce((sum, list) => sum + list.length, 0),
++        exams: data.exams.length,
++        hasGraduation: ['totalCredits', 'majorRequired', 'majorElective', 'engineeringBasic',
++          'generalEd', 'professionalEd', 'freeElective'].some(key => requirements[key]) ||
++          requirements.customRequirements.length > 0
++      };
++      const isEmpty = !summary.semesters && !summary.courses && !summary.exams &&
++        !summary.hasGraduation;
++      return isEmpty ? null : summary;
++    } catch (error) {
++      return null;
++    }
++  }
++
++  static legacyClaimed() {
++    return !!localStorage.getItem(`${BASE_KEY}_claimed`);
++  }
++
++  // 기존 데이터 내용 (원본은 지우지 않고 그대로 남김)
++  static readLegacy() {
++    const raw = localStorage.getItem(BASE_KEY);
++    return normalize(raw ? JSON.parse(raw) : null);
++  }
++
++  // 기존 데이터를 이 계정으로 옮겼다고 표시 (다른 계정에는 다시 묻지 않음)
++  static claimLegacy(uid) {
++    localStorage.setItem(`${BASE_KEY}_claimed`, uid);
++  }
++
+   static getSemesters() {
+     const data = this.loadData();
+     return data.semesters || [];
+@@ -65,13 +185,7 @@ export class Storage {
+     data.semesters.push(newSemester);
+     data.courses[id] = [];
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.addSemester(newSemester).catch(err =>
+-        console.error('Firestore 학기 저장 실패:', err)
+-      );
+-    }
+-
++    this.emit({ type: 'semester.set', semester: newSemester });
+     return newSemester;
+   }
+ 
+@@ -85,15 +199,7 @@ export class Storage {
+         updatedAt: new Date().toISOString()
+       };
+       this.saveData(data);
+-
+-      if (firebaseDbInstance) {
+-        firebaseDbInstance.updateSemester(id, {
+-          ...updates,
+-          updatedAt: new Date().toISOString()
+-        }).catch(err =>
+-          console.error('Firestore 학기 수정 실패:', err)
+-        );
+-      }
++      this.emit({ type: 'semester.set', semester: data.semesters[index] });
+     }
+   }
+ 
+@@ -102,12 +208,7 @@ export class Storage {
+     data.semesters = data.semesters.filter(s => s.id !== id);
+     delete data.courses[id];
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.deleteSemester(id).catch(err =>
+-        console.error('Firestore 학기 삭제 실패:', err)
+-      );
+-    }
++    this.emit({ type: 'semester.delete', id });
+   }
+ 
+   static getCourses(semesterId) {
+@@ -129,13 +230,7 @@ export class Storage {
+     };
+     data.courses[semesterId].push(newCourse);
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.addCourse(semesterId, newCourse).catch(err =>
+-        console.error('Firestore 과목 저장 실패:', err)
+-      );
+-    }
+-
++    this.emit({ type: 'course.set', semesterId, course: newCourse });
+     return newCourse;
+   }
+ 
+@@ -150,15 +245,7 @@ export class Storage {
+           updatedAt: new Date().toISOString()
+         };
+         this.saveData(data);
+-
+-        if (firebaseDbInstance) {
+-          firebaseDbInstance.updateCourse(semesterId, courseId, {
+-            ...updates,
+-            updatedAt: new Date().toISOString()
+-          }).catch(err =>
+-            console.error('Firestore 과목 수정 실패:', err)
+-          );
+-        }
++        this.emit({ type: 'course.set', semesterId, course: data.courses[semesterId][index] });
+       }
+     }
+   }
+@@ -168,12 +255,7 @@ export class Storage {
+     if (data.courses[semesterId]) {
+       data.courses[semesterId] = data.courses[semesterId].filter(c => c.id !== courseId);
+       this.saveData(data);
+-
+-      if (firebaseDbInstance) {
+-        firebaseDbInstance.deleteCourse(semesterId, courseId).catch(err =>
+-          console.error('Firestore 과목 삭제 실패:', err)
+-        );
+-      }
++      this.emit({ type: 'course.delete', semesterId, id: courseId });
+     }
+   }
+ 
+@@ -186,12 +268,7 @@ export class Storage {
+     const data = this.loadData();
+     data.settings = { ...data.settings, ...settings };
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.setSettings(data.settings).catch(err =>
+-        console.error('Firestore 설정 저장 실패:', err)
+-      );
+-    }
++    this.emit({ type: 'settings.set', settings: data.settings });
+   }
+ 
+   static getExams() {
+@@ -210,13 +287,7 @@ export class Storage {
+     };
+     data.exams.push(newExam);
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.addExam(newExam).catch(err =>
+-        console.error('Firestore 시험 저장 실패:', err)
+-      );
+-    }
+-
++    this.emit({ type: 'exam.set', exam: newExam });
+     return newExam;
+   }
+ 
+@@ -230,15 +301,7 @@ export class Storage {
+         updatedAt: new Date().toISOString()
+       };
+       this.saveData(data);
+-
+-      if (firebaseDbInstance) {
+-        firebaseDbInstance.updateExam(id, {
+-          ...updates,
+-          updatedAt: new Date().toISOString()
+-        }).catch(err =>
+-          console.error('Firestore 시험 수정 실패:', err)
+-        );
+-      }
++      this.emit({ type: 'exam.set', exam: data.exams[index] });
+     }
+   }
+ 
+@@ -246,17 +309,12 @@ export class Storage {
+     const data = this.loadData();
+     data.exams = data.exams.filter(e => e.id !== id);
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.deleteExam(id).catch(err =>
+-        console.error('Firestore 시험 삭제 실패:', err)
+-      );
+-    }
++    this.emit({ type: 'exam.delete', id });
+   }
+ 
+   static getGraduationRequirements() {
+     const data = this.loadData();
+-    return data.graduationRequirements || DEFAULT_DATA.graduationRequirements;
++    return data.graduationRequirements;
+   }
+ 
+   static updateGraduationRequirements(requirements) {
+@@ -266,12 +324,7 @@ export class Storage {
+       ...requirements
+     };
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+-        console.error('Firestore 졸업 요건 저장 실패:', err)
+-      );
+-    }
++    this.emit({ type: 'graduation.set', requirements: data.graduationRequirements });
+   }
+ 
+   static addCustomRequirement(requirement) {
+@@ -283,13 +336,7 @@ export class Storage {
+     };
+     data.graduationRequirements.customRequirements.push(newRequirement);
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+-        console.error('Firestore 커스텀 요구사항 저장 실패:', err)
+-      );
+-    }
+-
++    this.emit({ type: 'graduation.set', requirements: data.graduationRequirements });
+     return newRequirement;
+   }
+ 
+@@ -302,12 +349,7 @@ export class Storage {
+         ...updates
+       };
+       this.saveData(data);
+-
+-      if (firebaseDbInstance) {
+-        firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+-          console.error('Firestore 커스텀 요구사항 수정 실패:', err)
+-        );
+-      }
++      this.emit({ type: 'graduation.set', requirements: data.graduationRequirements });
+     }
+   }
+ 
+@@ -316,11 +358,6 @@ export class Storage {
+     data.graduationRequirements.customRequirements =
+       data.graduationRequirements.customRequirements.filter(r => r.id !== id);
+     this.saveData(data);
+-
+-    if (firebaseDbInstance) {
+-      firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+-        console.error('Firestore 커스텀 요구사항 삭제 실패:', err)
+-      );
+-    }
++    this.emit({ type: 'graduation.set', requirements: data.graduationRequirements });
+   }
+ }
+diff --git a/style.css b/style.css
+index 1d1c181..ab72485 100644
+--- a/style.css
++++ b/style.css
+@@ -1150,3 +1150,45 @@ label {
+     justify-content: flex-end;
+   }
+ }
++
++/* Cloud sync */
++.sync-loading {
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  min-height: 100vh;
++  padding: var(--spacing-md);
++  background-color: var(--color-gray-50);
++}
++
++.sync-loading-box {
++  text-align: center;
++  color: var(--color-gray-700);
++}
++
++.sync-loading-box p {
++  white-space: pre-line;
++}
++
++.sync-loading-actions {
++  flex-direction: column;
++  gap: var(--spacing-sm);
++  margin-top: var(--spacing-lg);
++}
++
++.sync-status {
++  position: fixed;
++  left: 50%;
++  bottom: var(--spacing-lg);
++  transform: translateX(-50%);
++  align-items: center;
++  gap: var(--spacing-md);
++  width: max-content;
++  max-width: calc(100% - 2rem);
++  padding: var(--spacing-sm) var(--spacing-md);
++  background-color: var(--color-gray-900);
++  color: var(--color-white);
++  border-radius: var(--border-radius);
++  font-size: var(--font-size-sm);
++  z-index: 2000;
++}
+diff --git a/sync.js b/sync.js
+new file mode 100644
+index 0000000..b4d744d
+--- /dev/null
++++ b/sync.js
+@@ -0,0 +1,209 @@
++import { firebaseDb } from './firebase-db.js';
++import { Storage } from './storage.js';
++
++// 같은 id의 항목이 양쪽에 있으면 updatedAt이 더 최근인 쪽을 사용 (같으면 로컬 우선)
++function mergeById(cloudList, localList) {
++  const merged = new Map(cloudList.map(item => [item.id, item]));
++  for (const local of localList) {
++    const remote = merged.get(local.id);
++    if (!remote || (local.updatedAt || '') >= (remote.updatedAt || '')) {
++      merged.set(local.id, local);
++    }
++  }
++  return [...merged.values()];
++}
++
++// 졸업 요건: 서버 값을 우선하되, 서버에 비어 있는 항목과 기타 졸업 요건은 기존 데이터로 채움
++function mergeRequirements(cloudReq, legacyReq) {
++  if (!cloudReq) return legacyReq;
++
++  const merged = { ...legacyReq, ...cloudReq };
++  for (const [key, value] of Object.entries(legacyReq)) {
++    if (key !== 'customRequirements' && (cloudReq[key] === null || cloudReq[key] === undefined)) {
++      merged[key] = value;
++    }
++  }
++
++  const customs = new Map((cloudReq.customRequirements || []).map(req => [req.id, req]));
++  for (const req of legacyReq.customRequirements || []) {
++    if (!customs.has(req.id)) customs.set(req.id, req);
++  }
++  merged.customRequirements = [...customs.values()];
++  return merged;
++}
++
++// 서버 데이터와 이 브라우저의 기존 데이터를 합침.
++// 설정은 서버에 값이 있으면 서버 값을 유지하고, 없을 때만 기존 데이터를 사용
++export function mergeSnapshots(cloud, legacy) {
++  const semesters = mergeById(cloud.semesters, legacy.semesters);
++  const courses = {};
++  for (const semester of semesters) {
++    courses[semester.id] = mergeById(
++      cloud.courses[semester.id] || [],
++      legacy.courses[semester.id] || []
++    );
++  }
++  return {
++    semesters,
++    courses,
++    exams: mergeById(cloud.exams, legacy.exams),
++    graduationRequirements: mergeRequirements(cloud.graduationRequirements, legacy.graduationRequirements),
++    settings: cloud.settings || legacy.settings
++  };
++}
++
++// 클라우드 동기화
++// - 화면은 그대로 Storage(로컬 캐시)를 읽고 쓴다.
++// - Storage에서 데이터가 바뀔 때마다 Firestore에도 같은 내용을 기록한다.
++// - 로그인할 때 Firestore의 데이터를 불러와 로컬 캐시를 채운다.
++// - 서버에 반영하지 못한 변경이 남아 있으면(dirty) 다음 로그인 때 불러오지 않고 먼저 서버로 올린다.
++class CloudSync {
++  constructor() {
++    this.enabled = false;
++    this.localOnly = false;
++    this.queue = Promise.resolve();
++    this.pending = 0;
++    this.failed = false;
++    this.statusListeners = [];
++    Storage.onChange((operation) => this.enqueue(operation));
++  }
++
++  onStatus(listener) {
++    this.statusListeners.push(listener);
++  }
++
++  notify(state, message = '') {
++    for (const listener of this.statusListeners) {
++      try {
++        listener(state, message);
++      } catch (error) {
++        console.error('동기화 상태 알림 오류:', error);
++      }
++    }
++  }
++
++  describeError(error) {
++    const detail = error && (error.code || error.message);
++    return `${firebaseDb.getErrorMessage(error || {})}${detail ? ` (${detail})` : ''}`;
++  }
++
++  hasPending() {
++    return this.pending > 0;
++  }
++
++  // 서버에 연결하지 못한 채 이 기기의 데이터로만 쓰는 모드.
++  // 서버로 보내지는 않고, 변경이 생기면 dirty로 표시해 다음 로그인 때 서버로 올린다.
++  useLocalOnly() {
++    this.enabled = false;
++    this.localOnly = true;
++  }
++
++  // 로그인 직후 호출: 로컬 캐시를 해당 계정 것으로 바꾸고 서버와 맞춘다.
++  // 반환: { ok: true, mode } 또는 { ok: false, error }
++  async start({ uid, confirmAdopt }) {
++    this.enabled = false;
++    this.localOnly = false;
++    this.failed = false;
++    await this.flush();
++    Storage.setUser(uid);
++
++    try {
++      if (Storage.getFlag('dirty')) {
++        // 지난번에 서버에 반영하지 못한 변경이 있음 → 로컬 데이터를 서버로 올린 뒤,
++        // 서버에만 있던 데이터까지 합쳐서 다시 받아온다
++        await firebaseDb.saveAll(Storage.loadData());
++        Storage.replaceAll(await firebaseDb.loadAll());
++        Storage.setFlag('dirty', false);
++        this.enabled = true;
++        return { ok: true, mode: 'pushed' };
++      }
++
++      const cloud = await firebaseDb.loadAll();
++
++      // 이 브라우저에 계정 도입 전부터 쌓인 데이터가 있으면, 물어본 뒤 서버 데이터와 합쳐서 올림
++      const legacy = Storage.legacySummary();
++      if (legacy && !Storage.legacyClaimed() && await confirmAdopt(legacy, !cloud.isEmpty)) {
++        Storage.replaceAll(mergeSnapshots(cloud, Storage.readLegacy()));
++        await firebaseDb.saveAll(Storage.loadData());
++        Storage.claimLegacy(uid);
++        Storage.setFlag('dirty', false);
++        this.enabled = true;
++        return { ok: true, mode: 'adopted' };
++      }
++
++      Storage.replaceAll(cloud);
++      Storage.setFlag('dirty', false);
++      this.enabled = true;
++      return { ok: true, mode: 'pulled' };
++    } catch (error) {
++      console.error('클라우드 동기화 시작 실패:', error);
++      return { ok: false, error: this.describeError(error) };
++    }
++  }
++
++  // 로그아웃 전에 아직 전송 중인 변경을 마무리 (오래 걸리면 포기하고 dirty로 남김)
++  async flush(timeoutMs = 5000) {
++    await Promise.race([
++      this.queue,
++      new Promise(resolve => setTimeout(resolve, timeoutMs))
++    ]);
++  }
++
++  // 로컬 동기화 사용을 끝낸다. 계정 전환 시 이전 계정 데이터에 쓰지 않도록 함
++  stop() {
++    this.enabled = false;
++    this.localOnly = false;
++    this.failed = false;
++  }
++
++  enqueue(operation) {
++    if (!this.enabled) {
++      if (this.localOnly) Storage.setFlag('dirty', true);
++      return;
++    }
++
++    // 서버에 반영될 때까지 dirty 표시 → 중간에 창을 닫아도 다음 로그인에서 복구
++    Storage.setFlag('dirty', true);
++    this.pending++;
++
++    this.queue = this.queue
++      .then(() => this.apply(operation))
++      .catch((error) => {
++        console.error('클라우드 저장 실패:', operation.type, error);
++        this.failed = true;
++        this.notify('error', this.describeError(error));
++      })
++      .then(() => {
++        this.pending--;
++        if (this.pending === 0 && !this.failed) {
++          Storage.setFlag('dirty', false);
++          this.notify('ok');
++        }
++      });
++  }
++
++  async apply(operation) {
++    switch (operation.type) {
++      case 'semester.set':
++        return firebaseDb.setSemester(operation.semester);
++      case 'semester.delete':
++        return firebaseDb.deleteSemester(operation.id);
++      case 'course.set':
++        return firebaseDb.setCourse(operation.semesterId, operation.course);
++      case 'course.delete':
++        return firebaseDb.deleteCourse(operation.semesterId, operation.id);
++      case 'exam.set':
++        return firebaseDb.setExam(operation.exam);
++      case 'exam.delete':
++        return firebaseDb.deleteExam(operation.id);
++      case 'graduation.set':
++        return firebaseDb.setGraduationRequirements(operation.requirements);
++      case 'settings.set':
++        return firebaseDb.setSettings(operation.settings);
++      default:
++        console.warn('알 수 없는 동기화 작업:', operation.type);
++    }
++  }
++}
++
++export const cloudSync = new CloudSync();

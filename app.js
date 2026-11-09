@@ -1,9 +1,10 @@
-import { Storage, setFirebaseDb } from './storage.js';
+import { Storage } from './storage.js';
 import { GradeCalculator } from './grade-calculator.js';
 import { ExamCalculator } from './exam-calculator.js';
 import { GraduationCalculator } from './graduation-calculator.js';
 import { authManager } from './firebase-auth.js';
 import { firebaseDb } from './firebase-db.js';
+import { cloudSync } from './sync.js';
 
 class RecordApp {
   constructor() {
@@ -17,6 +18,8 @@ class RecordApp {
     this.confirmCallback = null;
     this.useFirebase = false;
     this.isInitializing = true;
+    this.authSeq = 0;
+    this.activeUid = null;
     this.initializeApp();
   }
 
@@ -31,16 +34,29 @@ class RecordApp {
     this.useFirebase = firebaseInitialized && firebaseDbInitialized;
 
     if (this.useFirebase) {
-      // Storage에 firebaseDb 인스턴스 등록
-      setFirebaseDb(firebaseDb);
+      // 클라우드 저장에 실패하면 화면 아래에 알림 표시
+      cloudSync.onStatus((state, message) => {
+        if (state === 'error') {
+          this.showSyncStatus(`일부 변경사항을 클라우드에 저장하지 못했습니다. ${message}`);
+        } else {
+          this.hideSyncStatus();
+        }
+      });
 
-      // Firebase 인증 상태 모니터링
+      // 서버로 전송 중인 변경이 있는데 창을 닫으려 하면 경고
+      window.addEventListener('beforeunload', (e) => {
+        if (cloudSync.hasPending()) {
+          e.preventDefault();
+          e.returnValue = '';
+        }
+      });
+
+      // Firebase 인증 상태 모니터링 (로그인 / 로그아웃 / 새로고침)
       authManager.onAuthStateChange((user) => {
         if (user) {
-          this.showAppUI();
-          this.loadUserData();
+          this.handleSignedIn(user);
         } else {
-          this.showAuthUI();
+          this.handleSignedOut();
         }
       });
     } else {
@@ -52,11 +68,21 @@ class RecordApp {
   }
 
   showAuthUI() {
+    document.getElementById('syncLoading').style.display = 'none';
     document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('appContainer').style.display = 'none';
   }
 
+  showLoadingUI(message = '데이터를 불러오는 중...', withActions = false) {
+    document.getElementById('authScreen').style.display = 'none';
+    document.getElementById('appContainer').style.display = 'none';
+    document.getElementById('syncLoading').style.display = 'flex';
+    document.getElementById('syncLoadingText').textContent = message;
+    document.getElementById('syncLoadingActions').style.display = withActions ? 'flex' : 'none';
+  }
+
   showAppUI() {
+    document.getElementById('syncLoading').style.display = 'none';
     document.getElementById('authScreen').style.display = 'none';
     document.getElementById('appContainer').style.display = 'flex';
     if (this.isInitializing) {
@@ -65,25 +91,112 @@ class RecordApp {
     }
   }
 
-  async loadUserData() {
-    try {
-      if (!this.useFirebase) {
-        this.updateDashboard();
-        return;
-      }
+  showSyncStatus(message) {
+    document.getElementById('syncStatusText').textContent = message;
+    document.getElementById('syncStatus').style.display = 'flex';
+  }
 
-      // Firestore에서 데이터 로드
-      const semesters = await firebaseDb.getSemesters();
-      const exams = await firebaseDb.getExams();
-      const requirements = await firebaseDb.getGraduationRequirements();
-      const settings = await firebaseDb.getSettings();
+  hideSyncStatus() {
+    document.getElementById('syncStatus').style.display = 'none';
+  }
 
-      // 화면 업데이트
-      this.updateDashboard();
-    } catch (error) {
-      console.error('사용자 데이터 로드 실패:', error);
-      this.updateDashboard();
+  // 로그인 완료: 클라우드 데이터를 불러온 뒤 앱 화면을 보여줌
+  async handleSignedIn(user) {
+    // 같은 계정으로 이미 들어와 있는 상태의 중복 이벤트는 무시
+    if (this.activeUid === user.uid) return;
+
+    const seq = ++this.authSeq;
+    this.showLoadingUI();
+
+    const result = await cloudSync.start({
+      uid: user.uid,
+      confirmAdopt: (summary, cloudHasData) => this.confirmAdoptLegacy(user, summary, cloudHasData)
+    });
+
+    // 불러오는 사이에 로그아웃했거나 다른 계정으로 바뀐 경우
+    if (seq !== this.authSeq) return;
+
+    if (!result.ok) {
+      this.showLoadingUI(`클라우드에서 데이터를 불러오지 못했습니다.\n${result.error}`, true);
+      return;
     }
+
+    this.enterApp(user);
+  }
+
+  handleSignedOut() {
+    this.authSeq++;
+    this.activeUid = null;
+    cloudSync.stop();
+    this.hideSyncStatus();
+    this.showAuthUI();
+  }
+
+  enterApp(user) {
+    this.activeUid = user.uid;
+    this.hideSyncStatus();
+    this.resetViewState();
+    this.showAppUI();
+    this.refreshAllViews();
+  }
+
+  // 클라우드에 연결하지 못했을 때 이 기기의 데이터로만 사용
+  continueOffline() {
+    const user = authManager.getCurrentUser();
+    if (!user) return;
+
+    cloudSync.useLocalOnly();
+    this.enterApp(user);
+    this.showSyncStatus('클라우드에 연결되지 않아 이 기기에만 저장 중입니다.');
+  }
+
+  retrySync() {
+    const user = authManager.getCurrentUser();
+    if (!user) return;
+
+    this.activeUid = null;
+    this.handleSignedIn(user);
+  }
+
+  confirmAdoptLegacy(user, summary, cloudHasData) {
+    const parts = [`학기 ${summary.semesters}개`, `과목 ${summary.courses}개`, `시험 ${summary.exams}개`];
+    if (summary.hasGraduation) parts.push('졸업 요건');
+    const data = parts.join(', ');
+
+    if (cloudHasData) {
+      return confirm(
+        `이 브라우저에 저장된 기존 데이터(${data})가 있습니다.\n` +
+        `${user.email} 계정의 클라우드에도 이미 데이터가 있어 두 데이터를 합칠까요?\n\n` +
+        '[확인] 합쳐서 클라우드에 올립니다. 같은 항목은 더 최근에 수정한 쪽을 사용합니다.\n' +
+        '[취소] 합치지 않고 클라우드 데이터만 사용합니다. (다음 로그인 때 다시 물어봅니다)'
+      );
+    }
+
+    return confirm(
+      `이 브라우저에 저장된 기존 데이터(${data})를 ${user.email} 계정으로 옮길까요?\n\n` +
+      '[확인] 클라우드에 올려 어느 기기에서든 볼 수 있게 합니다.\n' +
+      '[취소] 옮기지 않고 빈 상태로 시작합니다. (다음 로그인 때 다시 물어봅니다)'
+    );
+  }
+
+  // 계정이 바뀌어도 이전 계정의 선택 상태가 남지 않도록 초기화
+  resetViewState() {
+    document.getElementById('semesterSelector').value = '';
+    document.getElementById('calendarEventsList').innerHTML =
+      '<p class="empty-state">날짜를 선택하세요.</p>';
+    this.selectSemester('');
+
+    this.currentSemesterId = null;
+    this.currentEditingCourseId = null;
+    this.currentEditingExamId = null;
+    this.currentEditingCustomReqId = null;
+    this.currentSelectedCalendarDate = null;
+  }
+
+  refreshAllViews() {
+    this.updateDashboard();
+    this.updateSemesterSelector();
+    this.updateCalendar();
   }
 
   init() {
@@ -1074,7 +1187,7 @@ class RecordApp {
     }
 
     document.getElementById('signupForm').reset();
-    alert('회원가입에 성공했습니다. 로그인해주세요.');
+    // 가입하면 자동으로 로그인되어 앱 화면으로 넘어감
     this.switchAuthForm('login');
   }
 
@@ -1101,6 +1214,9 @@ class RecordApp {
 
   async handleLogout() {
     if (!confirm('로그아웃하시겠습니까?')) return;
+
+    // 서버로 전송 중인 변경이 있으면 마무리한 뒤 로그아웃
+    await cloudSync.flush();
 
     const result = await authManager.signOutUser();
     if (result.success) {
