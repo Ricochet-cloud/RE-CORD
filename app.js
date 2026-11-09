@@ -1,4 +1,4 @@
-import { Storage } from './storage.js';
+import { Storage, setFirebaseDb } from './storage.js';
 import { GradeCalculator } from './grade-calculator.js';
 import { ExamCalculator } from './exam-calculator.js';
 import { GraduationCalculator } from './graduation-calculator.js';
@@ -31,6 +31,9 @@ class RecordApp {
     this.useFirebase = firebaseInitialized && firebaseDbInitialized;
 
     if (this.useFirebase) {
+      // Storage에 firebaseDb 인스턴스 등록
+      setFirebaseDb(firebaseDb);
+
       // Firebase 인증 상태 모니터링
       authManager.onAuthStateChange((user) => {
         if (user) {

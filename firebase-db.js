@@ -42,17 +42,10 @@ class FirebaseDatabase {
   // 학기 관련
   async addSemester(semester) {
     const uid = authManager.getUserId();
-    const id = Date.now().toString();
-    const semesterRef = doc(this.db, 'users', uid, 'semesters', id);
+    const semesterRef = doc(this.db, 'users', uid, 'semesters', semester.id);
 
-    await setDoc(semesterRef, {
-      ...semester,
-      id,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    return { id, ...semester };
+    await setDoc(semesterRef, semester);
+    return semester;
   }
 
   async getSemesters() {
@@ -95,17 +88,10 @@ class FirebaseDatabase {
   // 과목 관련
   async addCourse(semesterId, course) {
     const uid = authManager.getUserId();
-    const id = Date.now().toString();
-    const courseRef = doc(this.db, 'users', uid, 'semesters', semesterId, 'courses', id);
+    const courseRef = doc(this.db, 'users', uid, 'semesters', semesterId, 'courses', course.id);
 
-    await setDoc(courseRef, {
-      ...course,
-      id,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    return { id, ...course };
+    await setDoc(courseRef, course);
+    return course;
   }
 
   async getCourses(semesterId) {
@@ -141,17 +127,10 @@ class FirebaseDatabase {
   // 시험 관련
   async addExam(exam) {
     const uid = authManager.getUserId();
-    const id = Date.now().toString();
-    const examRef = doc(this.db, 'users', uid, 'exams', id);
+    const examRef = doc(this.db, 'users', uid, 'exams', exam.id);
 
-    await setDoc(examRef, {
-      ...exam,
-      id,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-
-    return { id, ...exam };
+    await setDoc(examRef, exam);
+    return exam;
   }
 
   async getExams() {

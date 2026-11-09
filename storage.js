@@ -19,6 +19,12 @@ const DEFAULT_DATA = {
   }
 };
 
+let firebaseDbInstance = null;
+
+export function setFirebaseDb(fbDb) {
+  firebaseDbInstance = fbDb;
+}
+
 export class Storage {
   static loadData() {
     try {
@@ -59,6 +65,13 @@ export class Storage {
     data.semesters.push(newSemester);
     data.courses[id] = [];
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.addSemester(newSemester).catch(err =>
+        console.error('Firestore 학기 저장 실패:', err)
+      );
+    }
+
     return newSemester;
   }
 
@@ -72,6 +85,15 @@ export class Storage {
         updatedAt: new Date().toISOString()
       };
       this.saveData(data);
+
+      if (firebaseDbInstance) {
+        firebaseDbInstance.updateSemester(id, {
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }).catch(err =>
+          console.error('Firestore 학기 수정 실패:', err)
+        );
+      }
     }
   }
 
@@ -80,6 +102,12 @@ export class Storage {
     data.semesters = data.semesters.filter(s => s.id !== id);
     delete data.courses[id];
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.deleteSemester(id).catch(err =>
+        console.error('Firestore 학기 삭제 실패:', err)
+      );
+    }
   }
 
   static getCourses(semesterId) {
@@ -101,6 +129,13 @@ export class Storage {
     };
     data.courses[semesterId].push(newCourse);
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.addCourse(semesterId, newCourse).catch(err =>
+        console.error('Firestore 과목 저장 실패:', err)
+      );
+    }
+
     return newCourse;
   }
 
@@ -115,6 +150,15 @@ export class Storage {
           updatedAt: new Date().toISOString()
         };
         this.saveData(data);
+
+        if (firebaseDbInstance) {
+          firebaseDbInstance.updateCourse(semesterId, courseId, {
+            ...updates,
+            updatedAt: new Date().toISOString()
+          }).catch(err =>
+            console.error('Firestore 과목 수정 실패:', err)
+          );
+        }
       }
     }
   }
@@ -124,6 +168,12 @@ export class Storage {
     if (data.courses[semesterId]) {
       data.courses[semesterId] = data.courses[semesterId].filter(c => c.id !== courseId);
       this.saveData(data);
+
+      if (firebaseDbInstance) {
+        firebaseDbInstance.deleteCourse(semesterId, courseId).catch(err =>
+          console.error('Firestore 과목 삭제 실패:', err)
+        );
+      }
     }
   }
 
@@ -136,6 +186,12 @@ export class Storage {
     const data = this.loadData();
     data.settings = { ...data.settings, ...settings };
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.setSettings(data.settings).catch(err =>
+        console.error('Firestore 설정 저장 실패:', err)
+      );
+    }
   }
 
   static getExams() {
@@ -154,6 +210,13 @@ export class Storage {
     };
     data.exams.push(newExam);
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.addExam(newExam).catch(err =>
+        console.error('Firestore 시험 저장 실패:', err)
+      );
+    }
+
     return newExam;
   }
 
@@ -167,6 +230,15 @@ export class Storage {
         updatedAt: new Date().toISOString()
       };
       this.saveData(data);
+
+      if (firebaseDbInstance) {
+        firebaseDbInstance.updateExam(id, {
+          ...updates,
+          updatedAt: new Date().toISOString()
+        }).catch(err =>
+          console.error('Firestore 시험 수정 실패:', err)
+        );
+      }
     }
   }
 
@@ -174,6 +246,12 @@ export class Storage {
     const data = this.loadData();
     data.exams = data.exams.filter(e => e.id !== id);
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.deleteExam(id).catch(err =>
+        console.error('Firestore 시험 삭제 실패:', err)
+      );
+    }
   }
 
   static getGraduationRequirements() {
@@ -188,6 +266,12 @@ export class Storage {
       ...requirements
     };
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+        console.error('Firestore 졸업 요건 저장 실패:', err)
+      );
+    }
   }
 
   static addCustomRequirement(requirement) {
@@ -199,6 +283,13 @@ export class Storage {
     };
     data.graduationRequirements.customRequirements.push(newRequirement);
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+        console.error('Firestore 커스텀 요구사항 저장 실패:', err)
+      );
+    }
+
     return newRequirement;
   }
 
@@ -211,6 +302,12 @@ export class Storage {
         ...updates
       };
       this.saveData(data);
+
+      if (firebaseDbInstance) {
+        firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+          console.error('Firestore 커스텀 요구사항 수정 실패:', err)
+        );
+      }
     }
   }
 
@@ -219,5 +316,11 @@ export class Storage {
     data.graduationRequirements.customRequirements =
       data.graduationRequirements.customRequirements.filter(r => r.id !== id);
     this.saveData(data);
+
+    if (firebaseDbInstance) {
+      firebaseDbInstance.setGraduationRequirements(data.graduationRequirements).catch(err =>
+        console.error('Firestore 커스텀 요구사항 삭제 실패:', err)
+      );
+    }
   }
 }
