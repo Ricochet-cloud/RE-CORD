@@ -21,6 +21,9 @@ class RecordApp {
   }
 
   async initializeApp() {
+    // 로그인 화면의 폼 이벤트는 로그인 전에도 동작해야 하므로 가장 먼저 등록
+    this.setupAuthListeners();
+
     // Firebase 초기화 시도
     const firebaseInitialized = await authManager.initialize();
     const firebaseDbInitialized = await firebaseDb.initialize();
@@ -86,11 +89,14 @@ class RecordApp {
     this.updateSemesterSelector();
   }
 
-  setupEventListeners() {
-    // Auth Forms
+  setupAuthListeners() {
     document.getElementById('loginForm')?.addEventListener('submit', (e) => this.handleLogin(e));
     document.getElementById('signupForm')?.addEventListener('submit', (e) => this.handleSignup(e));
     document.getElementById('resetForm')?.addEventListener('submit', (e) => this.handleReset(e));
+  }
+
+  setupEventListeners() {
+    // Auth Forms (login/signup/reset)는 setupAuthListeners()에서 처리
     document.getElementById('logoutBtn')?.addEventListener('click', () => this.handleLogout());
 
     // Navigation

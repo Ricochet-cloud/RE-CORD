@@ -132,6 +132,7 @@ class FirebaseAuthManager {
       'auth/user-disabled': '비활성화된 사용자 계정입니다.',
       'auth/user-not-found': '해당 이메일의 사용자가 없습니다.',
       'auth/wrong-password': '비밀번호가 일치하지 않습니다.',
+      'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다.',
       'auth/too-many-requests': '너무 많은 시도가 있었습니다. 나중에 다시 시도하세요.',
       'auth/network-request-failed': '네트워크 연결 오류입니다.'
     };
