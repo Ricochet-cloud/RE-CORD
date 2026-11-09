@@ -95,7 +95,9 @@ export class GradeCalculator {
     const categories = {
       'major-required': 0,
       'major-elective': 0,
+      'engineering-basic': 0,
       'general-ed': 0,
+      'professional-ed': 0,
       'free-elective': 0,
       'other': 0
     };

@@ -1,62 +1,43 @@
 export class GraduationCalculator {
+  // 졸업 기준 키 → 이수구분 값 (creditsMap의 키)
+  static CATEGORY_MAP = {
+    majorRequired: 'major-required',
+    majorElective: 'major-elective',
+    engineeringBasic: 'engineering-basic',
+    generalEd: 'general-ed',
+    professionalEd: 'professional-ed',
+    freeElective: 'free-elective'
+  };
+
+  static buildProgress(required, acquired) {
+    return {
+      required,
+      acquired,
+      remaining: Math.max(0, required - acquired),
+      progress: Math.min(100, Math.round((acquired / required) * 100))
+    };
+  }
+
   static calculateProgress(requirements, creditsMap) {
     const result = {
       total: null,
       majorRequired: null,
       majorElective: null,
+      engineeringBasic: null,
       generalEd: null,
+      professionalEd: null,
       freeElective: null,
       customRequirements: []
     };
 
-    if (requirements.totalCredits !== null && requirements.totalCredits > 0) {
-      const totalAcquired = creditsMap['total'] || 0;
-      result.total = {
-        required: requirements.totalCredits,
-        acquired: totalAcquired,
-        remaining: Math.max(0, requirements.totalCredits - totalAcquired),
-        progress: Math.min(100, Math.round((totalAcquired / requirements.totalCredits) * 100))
-      };
+    if (requirements.totalCredits > 0) {
+      result.total = this.buildProgress(requirements.totalCredits, creditsMap['total'] || 0);
     }
 
-    if (requirements.majorRequired !== null && requirements.majorRequired > 0) {
-      const acquired = creditsMap['major-required'] || 0;
-      result.majorRequired = {
-        required: requirements.majorRequired,
-        acquired,
-        remaining: Math.max(0, requirements.majorRequired - acquired),
-        progress: Math.min(100, Math.round((acquired / requirements.majorRequired) * 100))
-      };
-    }
-
-    if (requirements.majorElective !== null && requirements.majorElective > 0) {
-      const acquired = creditsMap['major-elective'] || 0;
-      result.majorElective = {
-        required: requirements.majorElective,
-        acquired,
-        remaining: Math.max(0, requirements.majorElective - acquired),
-        progress: Math.min(100, Math.round((acquired / requirements.majorElective) * 100))
-      };
-    }
-
-    if (requirements.generalEd !== null && requirements.generalEd > 0) {
-      const acquired = creditsMap['general-ed'] || 0;
-      result.generalEd = {
-        required: requirements.generalEd,
-        acquired,
-        remaining: Math.max(0, requirements.generalEd - acquired),
-        progress: Math.min(100, Math.round((acquired / requirements.generalEd) * 100))
-      };
-    }
-
-    if (requirements.freeElective !== null && requirements.freeElective > 0) {
-      const acquired = creditsMap['free-elective'] || 0;
-      result.freeElective = {
-        required: requirements.freeElective,
-        acquired,
-        remaining: Math.max(0, requirements.freeElective - acquired),
-        progress: Math.min(100, Math.round((acquired / requirements.freeElective) * 100))
-      };
+    for (const [key, category] of Object.entries(this.CATEGORY_MAP)) {
+      if (requirements[key] > 0) {
+        result[key] = this.buildProgress(requirements[key], creditsMap[category] || 0);
+      }
     }
 
     if (requirements.customRequirements && requirements.customRequirements.length > 0) {

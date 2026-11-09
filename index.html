@@ -370,7 +370,9 @@
             <option value="">선택</option>
             <option value="major-required">전공 필수</option>
             <option value="major-elective">전공 선택</option>
+            <option value="engineering-basic">공학기초</option>
             <option value="general-ed">교양</option>
+            <option value="professional-ed">전문교양</option>
             <option value="free-elective">일반 선택</option>
             <option value="other">기타</option>
           </select>
@@ -423,7 +425,9 @@
             <option value="">선택</option>
             <option value="major-required">전공 필수</option>
             <option value="major-elective">전공 선택</option>
+            <option value="engineering-basic">공학기초</option>
             <option value="general-ed">교양</option>
+            <option value="professional-ed">전문교양</option>
             <option value="free-elective">일반 선택</option>
             <option value="other">기타</option>
           </select>
@@ -564,8 +568,8 @@
       <form id="editGraduationForm" class="form">
         <h3>기본 항목 (학점)</h3>
         <div class="form-group">
-          <label for="totalCredits">총 졸업 필요 학점</label>
-          <input type="number" id="totalCredits" min="0" step="1">
+          <label for="graduationTotalCredits">총 졸업 필요 학점</label>
+          <input type="number" id="graduationTotalCredits" min="0" step="1">
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -585,6 +589,16 @@
           <div class="form-group">
             <label for="freeElectiveCredits">일반 선택</label>
             <input type="number" id="freeElectiveCredits" min="0" step="1">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="engineeringBasicCredits">공학기초</label>
+            <input type="number" id="engineeringBasicCredits" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label for="professionalEdCredits">전문교양</label>
+            <input type="number" id="professionalEdCredits" min="0" step="1">
           </div>
         </div>
         <div class="form-actions">

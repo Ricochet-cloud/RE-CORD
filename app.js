@@ -43,8 +43,8 @@ class RecordApp {
     } else {
       // Firebase 연결 실패 시 localStorage 사용
       console.warn('Firebase를 사용할 수 없습니다. localStorage를 사용합니다.');
+      // showAppUI()가 최초 1회 init()을 호출하므로 여기서 다시 부르지 않음 (이벤트 중복 등록 방지)
       this.showAppUI();
-      this.init();
     }
   }
 
@@ -430,7 +430,9 @@ class RecordApp {
     const labels = {
       'major-required': '전공 필수',
       'major-elective': '전공 선택',
+      'engineering-basic': '공학기초',
       'general-ed': '교양',
+      'professional-ed': '전문교양',
       'free-elective': '일반 선택',
       'other': '기타'
     };
@@ -818,33 +820,31 @@ class RecordApp {
 
   openEditGraduationModal() {
     const requirements = Storage.getGraduationRequirements();
-    document.getElementById('totalCredits').value = requirements.totalCredits || '';
+    document.getElementById('graduationTotalCredits').value = requirements.totalCredits || '';
     document.getElementById('majorRequiredCredits').value = requirements.majorRequired || '';
     document.getElementById('majorElectiveCredits').value = requirements.majorElective || '';
+    document.getElementById('engineeringBasicCredits').value = requirements.engineeringBasic || '';
     document.getElementById('generalEdCredits').value = requirements.generalEd || '';
+    document.getElementById('professionalEdCredits').value = requirements.professionalEd || '';
     document.getElementById('freeElectiveCredits').value = requirements.freeElective || '';
     this.openModal('editGraduationModal');
   }
 
   handleEditGraduation(e) {
     e.preventDefault();
-    const totalCredits = document.getElementById('totalCredits').value ?
-      parseInt(document.getElementById('totalCredits').value) : null;
-    const majorRequired = document.getElementById('majorRequiredCredits').value ?
-      parseInt(document.getElementById('majorRequiredCredits').value) : null;
-    const majorElective = document.getElementById('majorElectiveCredits').value ?
-      parseInt(document.getElementById('majorElectiveCredits').value) : null;
-    const generalEd = document.getElementById('generalEdCredits').value ?
-      parseInt(document.getElementById('generalEdCredits').value) : null;
-    const freeElective = document.getElementById('freeElectiveCredits').value ?
-      parseInt(document.getElementById('freeElectiveCredits').value) : null;
+    const readCredits = (id) => {
+      const value = document.getElementById(id).value;
+      return value ? parseInt(value) : null;
+    };
 
     Storage.updateGraduationRequirements({
-      totalCredits,
-      majorRequired,
-      majorElective,
-      generalEd,
-      freeElective
+      totalCredits: readCredits('graduationTotalCredits'),
+      majorRequired: readCredits('majorRequiredCredits'),
+      majorElective: readCredits('majorElectiveCredits'),
+      engineeringBasic: readCredits('engineeringBasicCredits'),
+      generalEd: readCredits('generalEdCredits'),
+      professionalEd: readCredits('professionalEdCredits'),
+      freeElective: readCredits('freeElectiveCredits')
     });
 
     this.updateGraduationProgress();
@@ -920,7 +920,8 @@ class RecordApp {
     let creditsMap = {};
     creditsMap['total'] = 0;
 
-    const categories = ['major-required', 'major-elective', 'general-ed', 'free-elective', 'other'];
+    const categories = ['major-required', 'major-elective', 'engineering-basic', 'general-ed',
+      'professional-ed', 'free-elective', 'other'];
     categories.forEach(cat => creditsMap[cat] = 0);
 
     semesters.forEach(sem => {
@@ -939,34 +940,26 @@ class RecordApp {
 
   renderGraduationProgress(progress) {
     const container = document.getElementById('graduationProgressContainer');
-    let html = '';
 
-    if (!progress.total && !progress.majorRequired && !progress.majorElective &&
-        !progress.generalEd && !progress.freeElective) {
+    // 기타 졸업 요건은 학점 기준 설정 여부와 상관없이 항상 갱신
+    this.updateCustomRequirementsList(progress.customRequirements);
+
+    const items = [
+      ['총 졸업 학점', progress.total],
+      ['전공 필수', progress.majorRequired],
+      ['전공 선택', progress.majorElective],
+      ['공학기초', progress.engineeringBasic],
+      ['교양', progress.generalEd],
+      ['전문교양', progress.professionalEd],
+      ['일반 선택', progress.freeElective]
+    ].filter(([, data]) => data);
+
+    if (items.length === 0) {
       container.innerHTML = '<p class="empty-state">졸업 기준을 설정하세요.</p>';
       return;
     }
 
-    if (progress.total) {
-      html += this.renderProgressItem('총 졸업 학점', progress.total);
-    }
-    if (progress.majorRequired) {
-      html += this.renderProgressItem('전공 필수', progress.majorRequired);
-    }
-    if (progress.majorElective) {
-      html += this.renderProgressItem('전공 선택', progress.majorElective);
-    }
-    if (progress.generalEd) {
-      html += this.renderProgressItem('교양', progress.generalEd);
-    }
-    if (progress.freeElective) {
-      html += this.renderProgressItem('일반 선택', progress.freeElective);
-    }
-
-    container.innerHTML = html;
-
-    // Custom requirements
-    this.updateCustomRequirementsList(progress.customRequirements);
+    container.innerHTML = items.map(([label, data]) => this.renderProgressItem(label, data)).join('');
   }
 
   renderProgressItem(label, data) {

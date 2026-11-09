@@ -8,7 +8,9 @@ const DEFAULT_DATA = {
     totalCredits: null,
     majorRequired: null,
     majorElective: null,
+    engineeringBasic: null,
     generalEd: null,
+    professionalEd: null,
     freeElective: null,
     customRequirements: []
   },
